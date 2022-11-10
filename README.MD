@@ -17,6 +17,7 @@ main functions:
 
 Send/receive engine design:
 main functions:
+
 1.send out tweets to all users active and into that users database file
 2.user login(retreive my home feed of twets from people I follow)
   2a. query all the data from people I follow
