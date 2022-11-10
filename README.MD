@@ -10,6 +10,7 @@ Database design:
 main functions:
 1. query(which database actor has my user data) for user data location.(once you know where it is you can update or retreive the user data) 
 2. add new user data entry to database
+
 3 main parts:
 1. Table actor(this is entry point to distributed database): This actor has a map that holds all database actor pids keyed on their unique hashed ID. (unique hash ID is used to figure out where twitter user is stored if userID hash <= actorID hash user is stored in that actor(Like chord stored in actor with greatest hashed ID not exceeding my userID hash value))
 2. Database actor(a single node of the distributed database): This actor holds a map that holds twitter users infomrmation keyed on twitter userID.
