@@ -1,7 +1,7 @@
 -module(database).
 -author("nicolas").
 -import(crypto,[hash/2]).
--export([createDatabase/1,chordActor/2,actorKiller/1,fillWithData/2]).
+-export([createDatabase/1,chordActor/1,databaseKiller/1,insert/3,query/2]).
 
 findSuccessor(SortedMapList,MinValue)-> % function searches the list to find the first value grater than or equal to MinValue
   findSuccessor(SortedMapList,MinValue,SortedMapList).% saves original list in case of a wrap around ex min value is larger than largest
@@ -44,120 +44,88 @@ createFingerTable(ActorHash,SortedListOfPids,I,FingerTable)-> % I is size of fin
   Hash = findSuccessor(SortedListOfPids,NextEntryMinHash), %% get smallest actor hash to fill current spot
   createFingerTable(ActorHash,SortedListOfPids,I-1,[Hash | FingerTable]).
 
-chordActor(SuperVisor,HashId)-> % startingPoint of actor
+chordActor(HashId)-> % startingPoint of actor
   receive
     {init, MapOfPids}->
       % make a finger table based of map of hash => PID, first make map a list sorted based on hash
       NewFingerTable = createFingerTable(HashId, lists:keysort(1,maps:to_list(MapOfPids)),160,[]), % initial FingerTable is empty and start filling fingerTable at index 1
       % Map of PIDs is sorted so that the search for next in line actors is most efficient
-      chordActor(SuperVisor,NewFingerTable,HashId,MapOfPids) % fingerTable is filled with {hashID,PID} tuples of the actors in network
+      chordActor(NewFingerTable,#{},HashId,MapOfPids) % fingerTable is filled with {hashID,PID} tuples of the actors in network
   % carries map of PIDs to build future fingerTables from
   end.
 
-chordActor(SuperVisor, FingerTable,HashId,MapOfPids)-> % second step of actor
-  %io:format("ActorHashID:~w~p~n",[HashId,self()]),
+chordActor( FingerTable,DataTable,HashId, MapOfPids)-> %final main actor
   receive
-  %add searchSet receive to start the searching process
-    {searchSet,SearchSetList}->
-      chordActor(SuperVisor, FingerTable,#{},HashId,SearchSetList,MapOfPids,0)
-  end.
-
-chordActor(SuperVisor, FingerTable,DataTable,HashId,SearchSetList, MapOfPids, HopsRunningSum)-> %final main actor
-  receive
-    {simulate}->
-      queryListFromInsideActor(SearchSetList,FingerTable),
-      chordActor(SuperVisor, FingerTable,DataTable,HashId,SearchSetList,MapOfPids,HopsRunningSum);
-
-    {queryResult,Result,Hops}-> % got result of its search back
-      NewSearchSetList = SearchSetList -- [decimalShaHash(Result)],
-      %io:format("Found ~s~nFrom~p~n",[Result,self()]), % if fails gets a tuple{badmap,Map}
-      if
-        length(NewSearchSetList) == 0 ->
-          SuperVisor ! {done,self(),Hops + HopsRunningSum};
-        true->
-          io:format("") % do nothing to prevent if clause error
-      end,
-      chordActor(SuperVisor, FingerTable,DataTable,HashId,NewSearchSetList,MapOfPids,HopsRunningSum+Hops);
-
-    {found,Key,SearchersPID,Hops}->
+    {found,Key,SearchersPID}->
       Result = maps:get(Key,DataTable),
-      SearchersPID ! {queryResult,Result,Hops+1},
-      chordActor(SuperVisor, FingerTable,DataTable,HashId,SearchSetList,MapOfPids,HopsRunningSum);
+      SearchersPID ! {queryResult,Result},
+      chordActor(FingerTable,DataTable,HashId,MapOfPids);
 
-    {find,Key,SearchersPID,Hops}->
-      {ToAskHash,ToAskPID} = findPredecessor(FingerTable,Key), % returns tuple {HashKey, PID}
+    {find,Key,SearchersPID}->
+      KeyHash = decimalShaHash(Key),
+      {ToAskHash,ToAskPID} = findPredecessor(FingerTable,decimalShaHash(Key)), % returns tuple {HashKey, PID}
       InMyDataTable = checkActorDataTable(DataTable,Key),
       if
         InMyDataTable == true-> % if in my data table done return value
-          SearchersPID ! {queryResult,maps:get(Key,DataTable),Hops},
+          SearchersPID ! {queryResult,maps:get(Key,DataTable)},
           NewMap = DataTable;
         HashId >= ToAskHash-> % looped to front
           if
-            Key > ToAskHash, Key > HashId -> % value bigger than biggest node so search in smallest node
-              ToAskPID ! {found,Key,SearchersPID,Hops+1},
+            KeyHash > ToAskHash, KeyHash > HashId -> % value bigger than biggest node so search in smallest node
+              ToAskPID ! {found,Key,SearchersPID},
               NewMap = DataTable;
-            ToAskHash >= Key-> % min value in min node
-              ToAskPID ! {found,Key,SearchersPID,Hops+1},
+            ToAskHash >= KeyHash-> % min value in min node
+              ToAskPID ! {found,Key,SearchersPID},
               NewMap = DataTable;
             true -> % haven't got to best spot yet loop around
-              ToAskPID ! {find,Key,SearchersPID,Hops+1},
+              ToAskPID ! {find,Key,SearchersPID},
               NewMap = DataTable
           end;
         true -> % increasing but don't know if passed optimal node so keep going until wrap around
           if
-            Key > HashId, ToAskHash >= Key-> % found best node
-              %io:format("Ask ~p from ~p ~n~w~n",[ToAskPID,self(),FingerTable]),
-              ToAskPID ! {found,Key,SearchersPID,Hops+1},
+            KeyHash > HashId, ToAskHash >= KeyHash-> % found best node
+              ToAskPID ! {found,Key,SearchersPID},
               NewMap = DataTable;
             true -> % passed best spot
-              ToAskPID ! {find,Key,SearchersPID,Hops+1},
+              ToAskPID ! {find,Key,SearchersPID},
               NewMap = DataTable
           end
       end,
-      chordActor(SuperVisor, FingerTable,NewMap,HashId,SearchSetList,MapOfPids,HopsRunningSum);
+      chordActor(FingerTable,NewMap,HashId,MapOfPids);
 
-    {finalAddKeyValue,Key,Value} -> % I am node that should hold key, value pair
+    {finalAddKeyValue,Key,Value,RequesteePID} -> % I am node that should hold key, value pair
       NewMap = maps:put(Key,Value,DataTable),
-      %io:format("My ~p,~w Data Table~w~n",[self(),HashId,NewMap]),
-      SuperVisor ! {dataInserted,Value}, % tell supervisor data is inserted so it knows when to start simulation;
-      chordActor(SuperVisor, FingerTable,NewMap,HashId,SearchSetList,MapOfPids,HopsRunningSum);
+      RequesteePID ! {dataInserted,Value}, % tell data is inserted
+      chordActor(FingerTable,NewMap,HashId,MapOfPids);
 
-    {addKeyValue,Key,Value}->
-      {ToAskHash,ToAskPID} = findPredecessor(FingerTable,Key), % returns tuple {HashKey, PID}
+    {addKeyValue,Key,Value,RequesteePID}->
+      KeyHash = decimalShaHash(Key),
+      {ToAskHash,ToAskPID} = findPredecessor(FingerTable,KeyHash), % returns tuple {HashKey, PID}
       if
         HashId >= ToAskHash-> % looped to front
           if
-            Key > ToAskHash, Key > HashId -> % value bigger than biggest node so insert in smallest node
-              %io:format("Ask ~p from ~p ~n~w~n",[ToAskPID,self(),FingerTable]),
-              ToAskPID ! {finalAddKeyValue,Key,Value},
+            KeyHash > ToAskHash, KeyHash > HashId -> % value bigger than biggest node so insert in smallest node
+              ToAskPID ! {finalAddKeyValue,Key,Value,RequesteePID},
               NewMap = DataTable;
-            ToAskHash >= Key-> % min value in min node
-              %io:format("Ask ~p from ~p ~n~w~n",[ToAskPID,self(),FingerTable]),
-              ToAskPID ! {finalAddKeyValue,Key,Value},
+            ToAskHash >= KeyHash-> % min value in min node
+              ToAskPID ! {finalAddKeyValue,Key,Value,RequesteePID},
               NewMap = DataTable;
             true -> % haven't got to best spot yet
-              ToAskPID ! {addKeyValue,Key,Value},
+              ToAskPID ! {addKeyValue,Key,Value,RequesteePID},
               NewMap = DataTable
           end;
         true -> % increasing but don't know if passed optimal node so keep going until wrap around
           if
-            Key > HashId, ToAskHash >= Key-> % found best node
-              %io:format("Ask ~p from ~p ~n~w~n",[ToAskPID,self(),FingerTable]),
-              ToAskPID ! {finalAddKeyValue,Key,Value},
+            KeyHash > HashId, ToAskHash >= KeyHash-> % found best node
+              ToAskPID ! {finalAddKeyValue,Key,Value,RequesteePID},
               NewMap = DataTable;
             true -> % passed best spot
-              ToAskPID ! {addKeyValue,Key,Value},
+              ToAskPID ! {addKeyValue,Key,Value,RequesteePID},
               NewMap = DataTable
           end
       end,
-      chordActor(SuperVisor, FingerTable,NewMap,HashId,SearchSetList,MapOfPids,HopsRunningSum)
+      chordActor(FingerTable,NewMap,HashId,MapOfPids)
   end.
-
-queryListFromInsideActor([],_)->
-  ok;
-queryListFromInsideActor(List,FingerTable)->
-  self() !{find,hd(List),self(),0}, % start looking at me
-  queryListFromInsideActor(tl(List),FingerTable).
 
 decimalShaHash(N)->
   binary:decode_unsigned(crypto:hash(sha,N)). % use sha 1 like doc says max size is unsigned 160 bit value = 1461501637330902918203684832716283019655932542976
@@ -166,11 +134,8 @@ createDatabase(NumberOfActors)-> % number of request means each actor must make 
   MapOfActors = spawnMultipleActors(NumberOfActors,#{}), % hashed key,PID map returned
   ListOfActors = [X || {_,X} <- maps:to_list(MapOfActors)], % remove hash keys only want pids of actors from now on
   init(ListOfActors,MapOfActors), % init first then start to begin searching(don't want actors to search from actors not done with init)
-  Data = [],
-  fillWithData(ListOfActors,Data),
   %return list of actors so twitter engine can use them so search/ insert
   ListOfActors.
-  %actorKiller(ListOfActors).
 
 init([],_)-> % sends actors everything they need to initialize finger table and data map
   ok;
@@ -179,28 +144,34 @@ init(ListOfActors,MapOfActors)->
   PID !  {init,MapOfActors},
   init(tl(ListOfActors),MapOfActors).
 
-fillWithData(_,[])->
-  ok;
-fillWithData(ListOfActors,CollisionFreeDataSet)->
-  PID = lists:nth(rand:uniform(length(ListOfActors)),ListOfActors), % insert starting at random actors
-  PID ! {addKeyValue,decimalShaHash(hd(CollisionFreeDataSet)),hd(CollisionFreeDataSet)},
+insert(ListOfDatabaseActors,Key,Value)->
+  PID = lists:nth(rand:uniform(length(ListOfDatabaseActors)),ListOfDatabaseActors), % insert starting at random actors
+  PID ! {addKeyValue,Key,Value,self()},
   receive
-    {dataInserted,Value}->
-      fillWithData(ListOfActors,CollisionFreeDataSet -- [Value])
+    {dataInserted,_}->
+      true
   end.
 
-actorKiller([])-> %Tell actors to kill themselves the swarm has converged
+query(ListOfDatabaseActors,Key)-> % optimize don't pick random pick based on key hash? swap to map to get hashId to pick instead?
+  PID = lists:nth(rand:uniform(length(ListOfDatabaseActors)),ListOfDatabaseActors), % insert starting at random actors
+  PID ! {find,Key,self()},
+  receive
+    {queryResult,Result}->
+      Result
+  end.
+
+databaseKiller([])-> %Tell actors to kill themselves the swarm has converged
   ok;
-actorKiller(ListOfActors)->
-  PID = hd(ListOfActors),
+databaseKiller(ListOfDatabaseActors)->
+  PID = hd(ListOfDatabaseActors),
   exit(PID,kill),
-  actorKiller(tl(ListOfActors)).
+  databaseKiller(tl(ListOfDatabaseActors)).
 
 spawnMultipleActors(0,MapOfPid)->
   MapOfPid;
 spawnMultipleActors(NumberOfActorsToSpawn,MapOfPid)->
   ActorIDHash = decimalShaHash( numberToString(NumberOfActorsToSpawn)),
-  NewMap = maps:put(ActorIDHash,spawn(project3,chordActor,[self(),ActorIDHash]), MapOfPid),
+  NewMap = maps:put(ActorIDHash,spawn(database,chordActor,[ActorIDHash]), MapOfPid),
   spawnMultipleActors( NumberOfActorsToSpawn-1,NewMap).
 
 numberToString(N) when N < 94 -> % 94 possible chars
