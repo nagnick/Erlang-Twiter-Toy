@@ -1,7 +1,7 @@
 -module(database).
 -author("nicolas").
 -import(crypto,[hash/2]).
--export([simulate/2,chordActor/2,actorKiller/1,createCollisionFreeData/1,createActorSearchList/2,fillWithData/2]).
+-export([createDatabase/1,chordActor/2,actorKiller/1,fillWithData/2]).
 
 findSuccessor(SortedMapList,MinValue)-> % function searches the list to find the first value grater than or equal to MinValue
   findSuccessor(SortedMapList,MinValue,SortedMapList).% saves original list in case of a wrap around ex min value is larger than largest
@@ -78,11 +78,6 @@ chordActor(SuperVisor, FingerTable,DataTable,HashId,SearchSetList, MapOfPids, Ho
           io:format("") % do nothing to prevent if clause error
       end,
       chordActor(SuperVisor, FingerTable,DataTable,HashId,NewSearchSetList,MapOfPids,HopsRunningSum+Hops);
-
-    {addActor,Pid,Id}->
-      NewMapOfPids = maps:put(Id,Pid,MapOfPids),
-      NewFingerTable = createFingerTable(HashId, lists:keysort(1,maps:to_list(NewMapOfPids)),160,[]), % update finger table by making a new one
-      chordActor(SuperVisor, NewFingerTable,DataTable,HashId,SearchSetList,NewMapOfPids,HopsRunningSum);
 
     {found,Key,SearchersPID,Hops}->
       Result = maps:get(Key,DataTable),
@@ -167,16 +162,15 @@ queryListFromInsideActor(List,FingerTable)->
 decimalShaHash(N)->
   binary:decode_unsigned(crypto:hash(sha,N)). % use sha 1 like doc says max size is unsigned 160 bit value = 1461501637330902918203684832716283019655932542976
 
-simulate(NumberOfActors,NumberOfRequests)-> % number of request means each actor must make that many SuperVisor of network will get responses from actors
+createDatabase(NumberOfActors)-> % number of request means each actor must make that many SuperVisor of network will get responses from actors
   MapOfActors = spawnMultipleActors(NumberOfActors,#{}), % hashed key,PID map returned
   ListOfActors = [X || {_,X} <- maps:to_list(MapOfActors)], % remove hash keys only want pids of actors from now on
   init(ListOfActors,MapOfActors), % init first then start to begin searching(don't want actors to search from actors not done with init)
-  Data = createCollisionFreeData(40000),% always test with same amount of data to get accurate measure of network size to hops required
-  distributeSearchSets(ListOfActors,Data,NumberOfRequests),
+  Data = [],
   fillWithData(ListOfActors,Data),
-  start(ListOfActors),
-  hopSum(ListOfActors,0,NumberOfActors,NumberOfRequests),
-  actorKiller(ListOfActors).
+  %return list of actors so twitter engine can use them so search/ insert
+  ListOfActors.
+  %actorKiller(ListOfActors).
 
 init([],_)-> % sends actors everything they need to initialize finger table and data map
   ok;
@@ -185,21 +179,7 @@ init(ListOfActors,MapOfActors)->
   PID !  {init,MapOfActors},
   init(tl(ListOfActors),MapOfActors).
 
-distributeSearchSets([],_,_)-> % gives actors a search set to start looking up data
-  ok;
-distributeSearchSets(ListOfActors,CollisionFreeDataSet, SearchSetSize)->
-  PID = hd(ListOfActors),
-  PID !  {searchSet,createActorSearchList(CollisionFreeDataSet,SearchSetSize)},
-  distributeSearchSets(tl(ListOfActors),CollisionFreeDataSet,SearchSetSize).
-
-start([])-> % gives actors the start signal
-  ok;
-start(ListOfActors)->
-  PID = hd(ListOfActors),
-  PID !  {simulate},
-  start(tl(ListOfActors)).
-
-fillWithData(_,[])-> % gives actors a search set to start looking up data
+fillWithData(_,[])->
   ok;
 fillWithData(ListOfActors,CollisionFreeDataSet)->
   PID = lists:nth(rand:uniform(length(ListOfActors)),ListOfActors), % insert starting at random actors
@@ -207,15 +187,6 @@ fillWithData(ListOfActors,CollisionFreeDataSet)->
   receive
     {dataInserted,Value}->
       fillWithData(ListOfActors,CollisionFreeDataSet -- [Value])
-  end.
-
-hopSum([],RunningSum,ActorCount,NumberOfRequests)-> % gets final messages from actor simulations and returns average
-  io:format("Average Number Of Hops Per Request: ~p~n",[(RunningSum/(ActorCount* NumberOfRequests))]);
-hopSum(ListOfActors,RunningSum,ActorCount,NumberOfRequests)->
-  receive
-    {done,ActorPID,TotalHops} ->
-      PIDs = ListOfActors -- [ActorPID],
-      hopSum(PIDs,RunningSum + TotalHops,ActorCount,NumberOfRequests)
   end.
 
 actorKiller([])-> %Tell actors to kill themselves the swarm has converged
@@ -231,34 +202,6 @@ spawnMultipleActors(NumberOfActorsToSpawn,MapOfPid)->
   ActorIDHash = decimalShaHash( numberToString(NumberOfActorsToSpawn)),
   NewMap = maps:put(ActorIDHash,spawn(project3,chordActor,[self(),ActorIDHash]), MapOfPid),
   spawnMultipleActors( NumberOfActorsToSpawn-1,NewMap).
-
-createActorSearchList(ListOfData,SizeOfSetReturned)-> % takes in list of collisionFreeData and returns a random set of keys for actors to lookup of given size
-  createActorSearchList(ListOfData,length(ListOfData),SizeOfSetReturned,[]).
-
-createActorSearchList(_,_,0,ReturnedList)->
-  ReturnedList;
-createActorSearchList(ListOfData,SizeOfList,SizeOfSetReturned,ReturnedList)->
-  Index = rand:uniform(SizeOfList),
-  createActorSearchList(ListOfData,SizeOfList,SizeOfSetReturned-1,[decimalShaHash(lists:nth(Index,ListOfData)) | ReturnedList]).
-
-
-createCollisionFreeData(NumberOfEntries)-> % anything more than 4000000 is slow
-  createCollisionFreeData(NumberOfEntries,3000, #{}).
-
-createCollisionFreeData(0,_, MapOfEntries)-> % creates a set of strings that do not collide
-  TupleList = maps:to_list(MapOfEntries),
-  [Value || {_,Value} <- TupleList];
-createCollisionFreeData(NumberOfEntries,NextStringNumber, MapOfEntries)->
-  Size = maps:size(MapOfEntries),
-  String = numberToString(NextStringNumber),
-  NewMap = maps:put(decimalShaHash(String),String,MapOfEntries), % if duplicate just rewrites value for key
-  NewSize = maps:size(NewMap),
-  if
-    NewSize == Size -> % new value generated already has it hash in map so overwrite value map has not grown still need to make same amount of data
-      createCollisionFreeData(NumberOfEntries,NextStringNumber+1,NewMap);
-    true-> % new value increased map size one lees data entry to make
-      createCollisionFreeData(NumberOfEntries-1,NextStringNumber+1,NewMap)
-  end.
 
 numberToString(N) when N < 94 -> % 94 possible chars
   [(N+33)]; % 33 = '!' 33 + 93 = 126 = '~' last acceptable char to us
