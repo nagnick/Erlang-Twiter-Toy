@@ -57,8 +57,8 @@ chordActor(HashId)-> % startingPoint of actor
 chordActor( FingerTable,DataTable,HashId, MapOfPids)-> %final main actor
   receive
     {found,Key,SearchersPID}->
-      Result = maps:get(Key,DataTable),
-      SearchersPID ! {queryResult,Result},
+      try SearchersPID ! {queryResult,maps:get(Key,DataTable)}
+      catch _:_ -> SearchersPID ! {queryResult,null} end,
       chordActor(FingerTable,DataTable,HashId,MapOfPids);
 
     {find,Key,SearchersPID}->
