@@ -4,14 +4,13 @@
 -export([]).
 %users send/receive tweets. engine distributes tweets
 %user stuff
-userActor(TweetList,FollowerList,FollowingList,UserDatabase)->
+userActor(TweetList,UserFeed,EnginePID)->
   receive
     {tweet, Message}->
-      userActor([Message | TweetList],FollowerList,FollowingList,UserDatabase);
-    {follow, UserId}->
-      NewFollowingList = query(UserDatabase,UserId),
-      userActor(TweetList,FollowerList,NewFollowingList,UserDatabase)
+      userActor(TweetList,[Message | UserFeed],EnginePID)
   end.
+userSendTweet(EnginePID,UserName,Tweet)->
+  EnginePID ! {distributeTweet,UserName,Tweet}.
 
 registerUser(Database, Username)->
   PID = spawn(twitterEngine,userActor,[[],[],[],Database]),
@@ -24,21 +23,27 @@ registerUser(Database, Username)->
 start()-> % returns enginePID
   UserDatabase = createDatabase(10),
   HashTagDatabase = createDatabase(5),
-  spawn(twitterEngine,engineActor,[]).
+  spawn(twitterEngine,engineActor,[UserDatabase,HashTagDatabase]).
 
 engineActor(UserDatabase,HashTagDatabase)->
   receive
-    {registerUser,UserName,UserData}->
-      insert(UserDatabase,UserName,UserData);
-    {distributeTweet,SendToList,Tweet}->
+    {registerUser,UserName,PID}-> %USERDATA = {UsersTweets,Following,Followers,PID}
+      insert(UserDatabase,UserName, {[],[],[],PID});
+    {registerHashTag,HashTag,HashTagData}->
+      insert(HashTagDatabase,HashTag,HashTagData);
+    {distributeTweet,Tweeter,Tweet}->
+      {_,_,SendToList,_} = query(UserDatabase,Tweeter),
       spawn(twitterEngine,distributerActor,[SendToList,Tweet]);
+    %WIP
     {retriveUser,RequestingProcess,UserName}->
-      RequestingProcess ! query(UserDatabase,UserName)
+      RequestingProcess ! query(UserDatabase,UserName);
+    {retriveHashTag,RequestingProcess,HashTag}->
+      RequestingProcess ! query(HashTagDatabase,HashTag)
   end,
   engineActor(UserDatabase,HashTagDatabase).
 
 distributerActor([],_)-> % distributes tweets to actors in SendToList
   ok;
 distributerActor(SendToList,Tweet)->
-  hd(SendToList) ! Tweet,
-  engineActor(tl(SendToList),Tweet).
+  hd(SendToList) ! {tweet,Tweet},
+  distributerActor(tl(SendToList),Tweet).
