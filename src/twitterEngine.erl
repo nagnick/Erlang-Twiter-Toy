@@ -63,8 +63,10 @@ engineActor(UserDatabase,HashTagDatabase)->
       engineActor(UserDatabase,HashTagDatabase);
     {distributeTweet,Tweeter,Tweet}->
       %add parsing to add hashtag tweets to hashTag database
-      {_,_,SendToList,_} = query(UserDatabase,Tweeter), % send to followers
+      {A,B,SendToList,C} = query(UserDatabase,Tweeter), % send to followers
       spawn(twitterEngine,distributerActor,[SendToList,Tweet]),% send tweet with distributer in own process
+      % add to Tweeter's Tweet list
+      insert(UserDatabase,Tweeter,{[Tweet | A],B,SendToList,C}),
       engineActor(UserDatabase,HashTagDatabase);
     %WIP
     {registerHashTag,HashTag,HashTagData}->
