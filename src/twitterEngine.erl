@@ -5,18 +5,20 @@
 %users send/receive tweets. engine distributes tweets
 %user stuff User can only contact the engine to accomplish tasks
 
-userActor(Username,UserFeed,EnginePID)-> % main userloop
+userActor(Username,UserFeed,FollowersPIDList,EnginePID)-> % main userloop
   receive
     {tweet, Message}-> % received from engine
-      userActor(Username,[Message | UserFeed],EnginePID);
+      userActor(Username,[Message | UserFeed],FollowersPIDList,EnginePID);
     {tweets, ListOfTweets}-> % received from engine as a result of following someone new
       % should probably sort the new tweets into my feed?
-      userActor(Username,[ListOfTweets|UserFeed],EnginePID)
+      userActor(Username,[ListOfTweets|UserFeed],FollowersPIDList,EnginePID);
+    {followerOnline,PID}-> % received notice of online follower
+      userActor(Username,UserFeed,[PID | FollowersPIDList],EnginePID)
   end.
 %userActions
 
-userSendTweet(EnginePID,UserName,Tweet)->
-  EnginePID ! {distributeTweet,UserName,Tweet}.
+userSendTweet(EnginePID,UserName,Tweet, FollowersPIDList)->
+  EnginePID ! {distributeTweet,UserName,Tweet, FollowersPIDList}.
 
 userFollowUser(EnginePID,Username,ToFollowUsername)->
   EnginePID ! {addFollow,Username, ToFollowUsername}.
@@ -46,12 +48,15 @@ engineActor(UserDatabase,HashTagDatabase)->
       databaseKiller(HashTagDatabase);
       % loop ends here
     {registerUser,Username}->
-      PID = spawn(twitterEngine,userActor,[Username,[],self()]),% actor values = Username,UserFeed,EnginePID
-      insert(UserDatabase,Username, {[],[],[],PID}),%USERDATA = {UsersTweets,Following,Followers,UserActorPID} NOTE Following& Followers are those users PIDs
+      insert(UserDatabase,Username, {[],[],[],null}),%USERDATA = {UsersTweets,Following,Followers,UserActorPID} NOTE Following& Followers are those users userNames
       engineActor(UserDatabase,HashTagDatabase);
     {logOn,Username,PID}->
-      {_,_,_,UserActorPID} = query(UserDatabase,Username),
-      PID ! UserActorPID,
+      {A,B,Followers,null} = query(UserDatabase,Username),
+      ActorPID = spawn(twitterEngine,userActor,[Username,[],self()]), %empty userfeed to begin... refill user feed somehow...
+      insert(UserDatabase,Username,{A,B,Followers,ActorPID}),
+      % tell followers I am online...
+      % send this to followers {followerOnline,ActorPID}
+      PID ! ActorPID,
       engineActor(UserDatabase,HashTagDatabase);
     {addFollow,Username, ToFollowUserName}-> % Username now follows ToFollowUsername
       {A,B,C,FollowUserPID} = query(UserDatabase,ToFollowUserName),
@@ -61,12 +66,12 @@ engineActor(UserDatabase,HashTagDatabase)->
       UserActorPID ! {tweets,A},
       insert(UserDatabase,Username,{D,[FollowUserPID| E],F,UserActorPID}), % update following list
       engineActor(UserDatabase,HashTagDatabase);
-    {distributeTweet,Tweeter,Tweet}->
+    {distributeTweet,Tweeter,Tweet, FollowersPID}->
       %add parsing to add hashtag tweets to hashTag database
-      {A,B,SendToList,C} = query(UserDatabase,Tweeter), % send to followers
-      spawn(twitterEngine,distributerActor,[SendToList,Tweet]),% send tweet with distributer in own process
+      {A,B,C,D} = query(UserDatabase,Tweeter), % send to followers
+      spawn(twitterEngine,distributerActor,[FollowersPID,Tweet]),% send tweet with distributer in own process
       % add to Tweeter's Tweet list
-      insert(UserDatabase,Tweeter,{[Tweet | A],B,SendToList,C}),
+      insert(UserDatabase,Tweeter,{[Tweet | A],B,C,D}), % update users list of tweets
       engineActor(UserDatabase,HashTagDatabase);
     %WIP
     {registerHashTag,HashTag,HashTagData}->
