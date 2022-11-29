@@ -55,7 +55,7 @@ engineActor(UserDatabase,HashTagDatabase)->
     {subscribeTo,UserPID,user,UserToSubscribeTo}-> % WIP
       %should i check if UserToSubscribeTo exists in DB? return null if not in DB
       {Tweets,Subs,SubActorPID} = query(UserDatabase,UserToSubscribeTo),
-      insert(UserDatabase,UserToSubscribeTo,{Tweets,[UserPID|Subs],SubActorPID}),% update followers list
+      insert(UserDatabase,UserToSubscribeTo,{Tweets,[UserPID|Subs],SubActorPID}),% update followers list should i check if already in list?
       %Send to user all tweets messed from before subed (user must organize if desired)
       UserPID ! {tweets,Tweets},
       engineActor(UserDatabase,HashTagDatabase);
