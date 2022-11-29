@@ -1,7 +1,7 @@
 -module(twitterEngine).
 -import(database,[createDatabase/1,chordActor/1,databaseKiller/1,insert/3,query/2]).
 
--export([]).
+-export([userActor/3,userSubscribeTo/3,userSendTweet/3,registerUser/2,logOn/2,start/0,killEngine/1,engineActor/2,distributerActor/2]).
 %users send/receive tweets. engine distributes tweets
 %user stuff User can only contact the engine to accomplish tasks
 
