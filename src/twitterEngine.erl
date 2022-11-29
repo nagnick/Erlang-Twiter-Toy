@@ -6,6 +6,12 @@
 %user stuff User can only contact the engine to accomplish tasks
 
 userActor(Username,UserFeed,EnginePID)-> % main userloop
+  % random chance of sending a tweet
+  %if totalNumMySubscribers <= rand(totalUsers). in simulate we assign users subscribers according to zipf
+  % do:
+    %if randomchance = 1 send tweet
+    % else do nothing
+  % else: nothing
   receive
     {tweet, Message}-> % received from engine
       userActor(Username,[Message | UserFeed],EnginePID);
@@ -23,7 +29,7 @@ userSendTweet(EnginePID,UserName,Tweet)-> % done
 registerUser(EnginePID, Username)-> % done
   EnginePID ! {registerUser,Username}.
 
-logOn(UserName,EnginePID)->%userStartUp part 2 stuff WIP
+logOn(UserName,EnginePID)->%userStartUp part 2 stuff WIP pass this engine useractor to the websocket actor as api
   EnginePID ! {logOn,UserName,self()},
   receive
     PID->
@@ -67,7 +73,12 @@ engineActor(UserDatabase,HashTagDatabase)->
       UserPID ! {tweets,Tweets},
       engineActor(UserDatabase,HashTagDatabase);
     {distributeTweet,Tweeter,Tweet}-> % WIP
+      % tweet = [heloo world #uf #top5 @mybestfriend]
+      % ListofTags = [#uf ,#top5] from parser
       %add parsing to add hashtag tweets to hashTag database
+        ListofTags = parser(Tweet),
+        ListOfMentions =
+        self() ! {distributeHashTag,hd(ListofTags),Tweet},
       {Tweets,Subs,SubActorPID} = query(UserDatabase,Tweeter), % send to followers
       spawn(twitterEngine,distributerActor,[Subs,Tweet]),% send tweet with distributer in own process
       % add to Tweeter's Tweet list
