@@ -1,7 +1,7 @@
 -module(database).
 -author("nicolas").
 -import(crypto,[hash/2]).
--export([createDatabase/1,chordActor/1,databaseKiller/1,userDatabaseKiller/1,insert/3,query/2]).
+-export([createDatabase/1,chordActor/1,databaseKiller/1,userDatabaseKiller/1,insert/3,query/2,numberToString/1]).
 
 findSuccessor(SortedMapList,MinValue)-> % function searches the list to find the first value grater than or equal to MinValue
   findSuccessor(SortedMapList,MinValue,SortedMapList).% saves original list in case of a wrap around ex min value is larger than largest
