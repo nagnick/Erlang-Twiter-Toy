@@ -1,11 +1,31 @@
 -module(twitterEngine).
--import(database,[createDatabase/1,chordActor/1,databaseKiller/1,insert/3,query/2]).
+-import(database,[createDatabase/1,chordActor/1,databaseKiller/1,userDatabaseKiller/1,insert/3,query/2]).
 
--export([userActor/3,userSubscribeTo/3,userSendTweet/3,registerUser/2,logOn/2,start/0,killEngine/1,engineActor/2,distributerActor/2]).
+-export([simulate/2,spinUpUsers/2,zipF/4,userSubscribeTo/3,userSendTweet/3,registerUser/2,logOn/2,startEngine/0,killEngine/1,engineActor/2,distributerActor/2,userActor/3]).
 %users send/receive tweets. engine distributes tweets
 %user stuff User can only contact the engine to accomplish tasks
+simulate(NumberOfUsers,ZipfAlpha)->
+  zipF(ZipfAlpha,1,2,0),
+  EnginePID = startEngine(),
+  spinUpUsers(EnginePID,NumberOfUsers).
+% use zipf zipf(probabilitymas, numberofUsers) returns an array of numbers one for each user... this number will be the
+% amount of subscribers for each user. some are very popular most are not.
+% if all users have a rank value 1 - n we can calculate their popularity
+zipF(AlphaExponentCharacterizingDistribution, 1, X,RunningSum)-> % implemented from http://www.math.wm.edu/~leemis/chart/UDR/PDFs/Zipf.pdf
+  Sum = 1 + RunningSum,
+  math:ceil(1/math:pow(X,AlphaExponentCharacterizingDistribution)* Sum); % ceiling to get integers >=1
+zipF(AlphaExponentCharacterizingDistribution, N, X, RunningSum)-> % N is total users and X is the rank of a random user
+  Sum = math:pow(1/N,AlphaExponentCharacterizingDistribution) + RunningSum,
+  zipF(AlphaExponentCharacterizingDistribution,N-1,X,Sum).
 
-userActor(Username,UserFeed,EnginePID)-> % main userloop
+spinUpUsers(_,0)->
+  ok;
+spinUpUsers(EnginePID,NumberOfUsers)->
+  RandomUsername = "RANDOM",
+  registerUser(EnginePID,RandomUsername),
+  spinUpUsers(EnginePID,NumberOfUsers-1).
+
+userActor(Username,UserFeed,EnginePID)-> % main userloop this will become the socket in part 2
   % random chance of sending a tweet
   %if totalNumMySubscribers <= rand(totalUsers). in simulate we assign users subscribers according to zipf
   % do:
@@ -37,7 +57,7 @@ logOn(UserName,EnginePID)->%userStartUp part 2 stuff WIP pass this engine userac
   end.
 
 %engine stuff
-start()-> % returns enginePID % done
+startEngine()-> % returns enginePID % done
   UserDatabase = createDatabase(10),
   HashTagDatabase = createDatabase(5),
   spawn(twitterEngine,engineActor,[UserDatabase,HashTagDatabase]).
@@ -46,8 +66,8 @@ killEngine(EnginePID)-> % done
 
 engineActor(UserDatabase,HashTagDatabase)->
   receive
-    die -> % WIP
-      databaseKiller(UserDatabase), % maybe pass in function so that actors are killed?
+    die -> % done
+      userDatabaseKiller(UserDatabase), % special version that kills the userActors as well
       databaseKiller(HashTagDatabase);
       % loop ends here
     {registerUser,Username}-> % done
@@ -76,9 +96,9 @@ engineActor(UserDatabase,HashTagDatabase)->
       % tweet = [heloo world #uf #top5 @mybestfriend]
       % ListofTags = [#uf ,#top5] from parser
       %add parsing to add hashtag tweets to hashTag database
-        ListofTags = parser(Tweet),
-        ListOfMentions =
-        self() ! {distributeHashTag,hd(ListofTags),Tweet},
+        %ListofTags =[],% parser(Tweet),
+        %ListOfMentions =
+        %self() ! {distributeHashTag,hd(ListofTags),Tweet},
       {Tweets,Subs,SubActorPID} = query(UserDatabase,Tweeter), % send to followers
       spawn(twitterEngine,distributerActor,[Subs,Tweet]),% send tweet with distributer in own process
       % add to Tweeter's Tweet list
