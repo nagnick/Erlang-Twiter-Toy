@@ -1,18 +1,23 @@
 -module(twitterEngine).
 %-import(database,[createDatabase/1,chordActor/1,databaseKiller/1,userDatabaseKiller/1,insert/3,query/2,numberToString/1]).
 
--export([simulate/2,endSimulate/1,zipF/4,userSubscribeTo/3,userSendTweet/3,registerUser/2,logOn/2,startEngine/1,killEngine/1,engineActor/5,distributerActor/2,userActor/4]).
+-export([tweetSpecialCharParse/2,simulate/3,userSubscribeTo/3,userSendTweet/3,registerUser/2,logOn/2,startEngine/1,killEngine/1,engineActor/5,distributerActor/2,userActor/4,processHashTags/3,processMentions/3]).
 %simulator stuff
-simulate(NumberOfUsers,ZipfAlpha)->
+simulate(NumberOfUsers,ZipfAlpha,SimulationRunTimeInMS)->
   EnginePID = startEngine(NumberOfUsers),
   ListOfUserNames = spinUpUsers(EnginePID,NumberOfUsers,[]),
-  %io:format("Total Users ~p",[NumberOfUsers]),
+  io:format("Setup complete. Starting simulation...~n"),
   EnginePID ! {setupSim, ListOfUserNames,ZipfAlpha},
-  EnginePID.
+  timer:sleep(SimulationRunTimeInMS),
+  io:format("Timer up final messages being processed. May take awhile if engine has large backlog.~n"),
+  {_,Num} = erlang:process_info(EnginePID, message_queue_len),
+  io:format("Messages engine must process ~p before exiting.~n",[Num]),
+  endSimulate(EnginePID).
 endSimulate(EnginePID)->
   EnginePID !{endSimulation,self()},
   receive
     {results,NumberOfUsers,NumOfTweets,DistributedTo}->
+      io:format("Simulation statistics:~n"),
       io:format("Total Users ~p~nTotal Tweets sent ~p~ndistributed across ~p~n",[NumberOfUsers,NumOfTweets,DistributedTo])
   end.
 % use zipf zipf(alpha, TotalNumberofUsers,RankOfUser,0) returns an array of numbers one for each user... this number will be the
@@ -42,25 +47,15 @@ userActor(Username,UserFeed,TotalNumberOfUsers,EnginePID)-> % starter
       userActor(Username,UserFeed,TotalNumberOfUsers,NumOfSubs,EnginePID)
   end.
 userActor(Username,UserFeed,TotalNumberOfUsers,NumberOfSubscribers,EnginePID)-> % main userloop this will become the socket in part 2
-%%  {_,MessagesInQueue} = erlang:process_info(self(), message_queue_len),
-%%  if
-%%    MessagesInQueue < 1->
-      ChanceToTweet = rand:uniform(TotalNumberOfUsers div NumberOfSubscribers),
+      NumOfTweetsToSend = rand:uniform(NumberOfSubscribers), % the more subs you have the more likely you are to tweet more messages
       ChanceToBeActive = rand:uniform(24),
       % in simulate we assign users subscribers according to zipf the ones with more subs will send tweets with greater probability
       if
         ChanceToBeActive < 7 -> % random simulation of user being live.(kinda like 7 hours a day)
-          if
-            NumberOfSubscribers > ChanceToTweet -> % the more subs you have the more likely you are to tweet
-              userSendTweet(EnginePID,Username,"MYTWEET");
-            true->
-              ok
-          end,
-          userActor(Username,UserFeed,TotalNumberOfUsers,NumberOfSubscribers,EnginePID);
+          userSendRandomTweets(EnginePID,Username,NumOfTweetsToSend);
         true-> % not live sleep for a little then wait for a tweet to send you back as notifications do
-          timer:sleep(3)
+          timer:sleep(1)
       end,
-%%    true ->
       receive
         die ->
           ok;
@@ -70,7 +65,6 @@ userActor(Username,UserFeed,TotalNumberOfUsers,NumberOfSubscribers,EnginePID)-> 
           userActor(Username,[ListOfTweets|UserFeed],TotalNumberOfUsers,NumberOfSubscribers,EnginePID);
         {simSubCountUpdate, NumOfSubs}-> % part of simulator startup first thing done by actor in sim
           userActor(Username,UserFeed,TotalNumberOfUsers,NumOfSubs,EnginePID)
-%%      end
   end.
 
 %userActions
@@ -130,12 +124,11 @@ engineActor(UserDatabase,HashTagDatabase,TotalNumberOfUsers,NumOfTweets,Distribu
       UserPID ! {tweets,Tweets},
       engineActor(UserDatabase,maps:put(HashToSubscribeTo,{Tweets,[UserPID|Subs],SubActorPID},HashTagDatabase),TotalNumberOfUsers,NumOfTweets,DistributedTo);
     {distributeTweet,Tweeter,Tweet}-> % WIP
-      % tweet = [heloo world #uf #top5 @mybestfriend]
-      % ListofTags = [#uf ,#top5] from parser
-      %add parsing to add hashtag tweets to hashTag database
-        %ListofTags =[],% parser(Tweet),
-        %ListOfMentions =
-        %self() ! {distributeHashTag,hd(ListofTags),Tweet},
+      % Tweet = [heloo world #uf #top5 @mybestfriend]
+      ListOfHashTags = tweetSpecialCharParse(Tweet,"#"),
+      ListOfMentions = tweetSpecialCharParse(Tweet,"@"),
+      spawn(twitterEngine,processHashTags,[ListOfHashTags,Tweet,self()]),
+      spawn(twitterEngine,processMentions,[ListOfMentions,Tweet,UserDatabase]),
       {Tweets,Subs,SubActorPID} = maps:get(Tweeter,UserDatabase), % send to followers
       spawn(twitterEngine,distributerActor,[Subs,Tweet]),% send tweet with distributer in own process
       % add to Tweeter's Tweet list
@@ -160,6 +153,20 @@ engineSimSetup(UserDatabase,ListOfUsers,CompleteListOfUsers,ZipfAlpha,TotalNumbe
   ListOfSubPIDS = convertUserNamesToPids(UserDatabase,ListOfSubs,[]),
   engineSimSetup(maps:put(hd(ListOfUsers),{UserTweets,ListOfSubPIDS,UserActorPID},UserDatabase),tl(ListOfUsers),CompleteListOfUsers,ZipfAlpha,TotalNumberOfUsers,Rank+1).
 
+processHashTags([],_,_)->
+  ok;
+processHashTags(ListOfHashTags,Tweet,EnginePID)-> % sends hashtags to engine to distribute/store
+  EnginePID! {distributeHashTag,hd(ListOfHashTags),Tweet},
+  processHashTags(tl(ListOfHashTags),Tweet,EnginePID).
+
+processMentions([],_,_)->
+  ok;
+processMentions(ListOfMentions,Tweet,UserDatabase)-> % sends tweet to users mentioned in tweet
+  {_,_,ActorPID} = try maps:get(string:sub_string(hd(ListOfMentions),2),UserDatabase) % substring to drop @ char from front...
+  catch _:_ -> {[],[],self()} end, % incase where actor does not exist tweet sent to me and thrown away when i die
+  ActorPID ! {tweet, Tweet},
+  processMentions(tl(ListOfMentions),Tweet,UserDatabase).
+
 distributerActor([],_)-> % distributes tweets to actors in SendToList allows engine to focus on main functionality
   ok;
 distributerActor(SendToList,Tweet)->
@@ -167,6 +174,12 @@ distributerActor(SendToList,Tweet)->
   distributerActor(tl(SendToList),Tweet).
 
 %helpers
+userSendRandomTweets(_,_,0)->
+  ok;
+userSendRandomTweets(EnginePID,Username,N)->
+  userSendTweet(EnginePID,Username,"MYTWEET"),
+  userSendRandomTweets(EnginePID,Username,N-1).
+
 numberToString(N) when N < 94 -> % 94 possible chars
   [(N+33)]; % 33 = '!' 33 + 93 = 126 = '~' last acceptable char to us
 numberToString(N) when N >= 94->
@@ -182,10 +195,32 @@ actorKiller([])-> %Tell actors to kill themselves
   ok;
 actorKiller(ListOfActors)->
   PID = hd(ListOfActors),
-%%  exit(PID,kill),
   PID ! die,
   actorKiller(tl(ListOfActors)).
 
 killActorInUserDatabase(UserDatabase)->
       UserList = [PIDs || {_,{_,_,PIDs}} <- maps:to_list(UserDatabase)],
       actorKiller(UserList). % kill the user actors
+
+specialCharSearch([],_,ListOfHashTags)->
+  ListOfHashTags;
+specialCharSearch(List_of_Tweet,Char,ListOfHashTags)->
+    Split_string = hd(List_of_Tweet),
+    StartOfHash = string:find(Split_string,Char),
+    if
+      StartOfHash == nomatch->
+        specialCharSearch(tl(List_of_Tweet),Char,ListOfHashTags);
+      true ->
+        Matched_tag = string:equal(Char,string:sub_string(StartOfHash,1, 1)),
+        if
+          Matched_tag->
+            %io:fwrite("HashTag is ~p ~n",[StartOfHash]),
+            specialCharSearch(tl(List_of_Tweet),Char,[StartOfHash|ListOfHashTags]);
+            true->
+              specialCharSearch(tl(List_of_Tweet),Char,ListOfHashTags)
+        end
+end.
+
+tweetSpecialCharParse(Tweet,SpecialChar)-> % returns list of hashtags if "#" or mentions if "@"...
+  List_of_Tweet = string:split(Tweet, " ",all),
+  specialCharSearch(List_of_Tweet,SpecialChar,[]).
