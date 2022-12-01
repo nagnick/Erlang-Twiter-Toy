@@ -4,6 +4,8 @@ Twitter
 
 Anurag - We are using chord implementation. How can I implement register new user. 
 
+Limit: 30500
+
 
 
 Database design:
