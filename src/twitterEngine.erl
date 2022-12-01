@@ -11,10 +11,6 @@ simulate(NumberOfUsers,ZipfAlpha)->
   EnginePID.
 endSimulate(EnginePID)->
   EnginePID !{endSimulation,self()},
-  EnginePID !{endSimulation,self()},
-  EnginePID !{endSimulation,self()},
-  EnginePID !{endSimulation,self()},
-  EnginePID !{endSimulation,self()},
   receive
     {results,NumberOfUsers,NumOfTweets,DistributedTo}->
       io:format("Total Users ~p~nTotal Tweets sent ~p~ndistributed across ~p~n",[NumberOfUsers,NumOfTweets,DistributedTo])
@@ -111,8 +107,7 @@ engineActor(UserDatabase,HashTagDatabase,TotalNumberOfUsers,NumOfTweets,Distribu
     {endSimulation,SuperVisor}-> % done
       % loop ends here send simulator final engine stats
       SuperVisor ! {results,TotalNumberOfUsers,NumOfTweets,DistributedTo},
-      killActorInUserDatabase(UserDatabase),
-      SuperVisor ! {results,TotalNumberOfUsers,NumOfTweets,DistributedTo};
+      killActorInUserDatabase(UserDatabase);
     {setupSim, ListOfUserNames,ZipfAlpha}-> % done Only called once at setup
       %set each user up to have all its subs based on zipF distribution
       NewUserDatabase = engineSimSetup(UserDatabase,ListOfUserNames,ListOfUserNames,ZipfAlpha,TotalNumberOfUsers,1),
