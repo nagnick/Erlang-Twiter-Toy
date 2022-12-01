@@ -43,7 +43,7 @@ userActor(Username,UserFeed,TotalNumberOfUsers,EnginePID)-> % starter
   receive
     die ->
       ok;
-    {simSubCountUpdate, NumOfSubs}-> % part of simulator startup first thing done by actor in sim
+    {simStart, NumOfSubs}-> % part of simulator startup first thing done by actor in sim
       userActor(Username,UserFeed,TotalNumberOfUsers,NumOfSubs,EnginePID)
   end.
 userActor(Username,UserFeed,TotalNumberOfUsers,NumberOfSubscribers,EnginePID)-> % main userloop this will become the socket in part 2
@@ -52,9 +52,9 @@ userActor(Username,UserFeed,TotalNumberOfUsers,NumberOfSubscribers,EnginePID)-> 
       % in simulate we assign users subscribers according to zipf the ones with more subs will send tweets with greater probability
       if
         ChanceToBeActive < 7 -> % random simulation of user being live.(kinda like 7 hours a day)
-          userSendRandomTweets(EnginePID,Username,NumOfTweetsToSend);
-        true-> % not live sleep for a little then wait for a tweet to send you back as notifications do
-          timer:sleep(1)
+          userSendRandomTweets(EnginePID,Username,NumOfTweetsToSend,UserFeed);
+        true-> % not live sleep for 8 hours then wait for a tweet to send you back as notifications do
+          timer:sleep(8)
       end,
       receive
         die ->
@@ -66,15 +66,38 @@ userActor(Username,UserFeed,TotalNumberOfUsers,NumberOfSubscribers,EnginePID)-> 
         {simSubCountUpdate, NumOfSubs}-> % part of simulator startup first thing done by actor in sim
           userActor(Username,UserFeed,TotalNumberOfUsers,NumOfSubs,EnginePID)
   end.
-
+%user simulated action.
+userSendRandomTweets(_,_,0,_)->
+  ok;
+userSendRandomTweets(EnginePID,Username,N,UserFeed)->
+  ChanceToSend = rand:uniform(10),
+  if
+    ChanceToSend == 1 -> % send basic tweet
+      userSendTweet(EnginePID,Username,"MYTWEET");
+    ChanceToSend == 2 -> % sendRetweet
+      if
+        length(UserFeed) == 0 ->
+          ok;
+        true ->
+          OriginalTweet = lists:nth(rand:uniform(length(UserFeed)),UserFeed), % pick random tweet to reTweet
+          userSendRetweet(EnginePID,Username,OriginalTweet)
+      end;
+    true -> % do nothing
+      ok
+  end,
+  userSendRandomTweets(EnginePID,Username,N-1,UserFeed).
 %userActions
 userSubscribeTo(EnginePID,UserOrHashTag,ID)-> % done
   EnginePID ! {subscribeTo,self(),UserOrHashTag,ID}.% UserOrHashTag = 'user' for user and 'hash' for hashTag
 
 userSendTweet(EnginePID,UserName,Tweet)-> % done
   % tweets can be original or a retweet(gotten from userfeed) left for user to decide as engine see's no difference between them
-  EnginePID ! {distributeTweet,UserName,Tweet}.
+  EnginePID ! {distributeTweet,{UserName,Tweet}}.
 
+userSendRetweet(EnginePID,Username,OriginalTweet)->% done originalTweet = {OriginalSender, OriginalMessage}
+  {OSender,OMessage} = OriginalTweet,
+  Tweet = OMessage ++ ("@" ++ OSender), % retweets you send the original tweet as your own but at end you mention original poster
+  EnginePID ! {distributeTweet,{Username,Tweet}}.
 %engine stuff
 startEngine(TotalNumberOfUsers)-> % returns enginePID % done
   UserDatabase = #{},
@@ -119,25 +142,26 @@ engineActor(UserDatabase,HashTagDatabase,TotalNumberOfUsers,NumOfTweets,Distribu
       UserPID ! {tweets,Tweets},
       engineActor(maps:put(UserToSubscribeTo,{Tweets,[UserPID|Subs],SubActorPID},UserDatabase),HashTagDatabase,TotalNumberOfUsers,NumOfTweets,DistributedTo);
     {subscribeTo,UserPID,hash,HashToSubscribeTo}-> % done
-      {Tweets,Subs,SubActorPID} = maps:get(HashToSubscribeTo,HashTagDatabase),
+      {Tweets,Subs} = maps:get(HashToSubscribeTo,HashTagDatabase),
       %Send to user all tweets sent from before subed
       UserPID ! {tweets,Tweets},
-      engineActor(UserDatabase,maps:put(HashToSubscribeTo,{Tweets,[UserPID|Subs],SubActorPID},HashTagDatabase),TotalNumberOfUsers,NumOfTweets,DistributedTo);
-    {distributeTweet,Tweeter,Tweet}-> % WIP
-      % Tweet = [heloo world #uf #top5 @mybestfriend]
+      engineActor(UserDatabase,maps:put(HashToSubscribeTo,{Tweets,[UserPID|Subs]},HashTagDatabase),TotalNumberOfUsers,NumOfTweets,DistributedTo);
+    {distributeTweet,FullTweet}-> % WIP
+      {Tweeter,Tweet} = FullTweet,
+      % Tweets sent as {User,message} tweet will be just the message
       ListOfHashTags = tweetSpecialCharParse(Tweet,"#"),
       ListOfMentions = tweetSpecialCharParse(Tweet,"@"),
-      spawn(twitterEngine,processHashTags,[ListOfHashTags,Tweet,self()]),
-      spawn(twitterEngine,processMentions,[ListOfMentions,Tweet,UserDatabase]),
+      spawn(twitterEngine,processHashTags,[ListOfHashTags,FullTweet,self()]),
+      spawn(twitterEngine,processMentions,[ListOfMentions,FullTweet,UserDatabase]),
       {Tweets,Subs,SubActorPID} = maps:get(Tweeter,UserDatabase), % send to followers
-      spawn(twitterEngine,distributerActor,[Subs,Tweet]),% send tweet with distributer in own process
+      spawn(twitterEngine,distributerActor,[Subs,FullTweet]),% send tweet with distributer in own process
       % add to Tweeter's Tweet list
-      engineActor(maps:put(Tweeter,{[Tweet | Tweets],Subs,SubActorPID},UserDatabase),HashTagDatabase,TotalNumberOfUsers,NumOfTweets + 1,DistributedTo + length(Subs));
+      engineActor(maps:put(Tweeter,{[FullTweet | Tweets],Subs,SubActorPID},UserDatabase),HashTagDatabase,TotalNumberOfUsers,NumOfTweets + 1,DistributedTo + length(Subs));
     {distributeHashTag,HashTag,Tweet}-> % done
       {Tweets,Subs} = try maps:get(HashTag,HashTagDatabase)
       catch _:_ -> {[],[]} end,
-      distributerActor(Subs,Tweet),
-      HashTagDatabase2 = maps:put(HashTag,{[Tweet|Tweets]},HashTagDatabase),
+      spawn(twitterEngine,distributerActor,[Subs,Tweet]),
+      HashTagDatabase2 = maps:put(HashTag,{[Tweet|Tweets],Subs},HashTagDatabase),
       engineActor(UserDatabase,HashTagDatabase2,TotalNumberOfUsers,NumOfTweets,DistributedTo)
   end.
 
@@ -149,7 +173,7 @@ engineSimSetup(UserDatabase,ListOfUsers,CompleteListOfUsers,ZipfAlpha,TotalNumbe
   % they will become the followers of this user
   {UserTweets,_,UserActorPID} = maps:get(hd(ListOfUsers),UserDatabase),
   % update the user's sub count
-  UserActorPID ! {simSubCountUpdate, length(ListOfSubs)},
+  UserActorPID ! {simStart, length(ListOfSubs)},
   ListOfSubPIDS = convertUserNamesToPids(UserDatabase,ListOfSubs,[]),
   engineSimSetup(maps:put(hd(ListOfUsers),{UserTweets,ListOfSubPIDS,UserActorPID},UserDatabase),tl(ListOfUsers),CompleteListOfUsers,ZipfAlpha,TotalNumberOfUsers,Rank+1).
 
@@ -174,11 +198,6 @@ distributerActor(SendToList,Tweet)->
   distributerActor(tl(SendToList),Tweet).
 
 %helpers
-userSendRandomTweets(_,_,0)->
-  ok;
-userSendRandomTweets(EnginePID,Username,N)->
-  userSendTweet(EnginePID,Username,"MYTWEET"),
-  userSendRandomTweets(EnginePID,Username,N-1).
 
 numberToString(N) when N < 94 -> % 94 possible chars
   [(N+33)]; % 33 = '!' 33 + 93 = 126 = '~' last acceptable char to us
