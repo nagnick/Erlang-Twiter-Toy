@@ -1,5 +1,6 @@
 -module(engine).
--export([tweetSpecialCharParse/2,userSubscribeTo/3,userSendTweet/3,userSendRetweet/3,registerUser/2,logOn/2,startEngine/1,killEngine/1,engineActor/5,distributerActor/2,userActor/3,processHashTags/3,processMentions/3]).
+-compile(export_all).
+%-export([tweetSpecialCharParse/2,userSubscribeTo/3,userSendTweet/3,userSendRetweet/3,registerUser/2,logOn/2,getEngine/0,startEngine/0,killEngine/1,engineActor/5,distributerActor/2,userActor/4,processHashTags/3,processMentions/3]).
 % point of access for client to access user account this must change to accept the websocket design
 logOn(UserName,EnginePID)->%userStartUp part 2 stuff WIP pass this engine useractor to the websocket actor as api
   EnginePID ! {logOn,UserName,self()},
@@ -9,25 +10,37 @@ logOn(UserName,EnginePID)->%userStartUp part 2 stuff WIP pass this engine userac
   end.
 %users send/receive tweets. engine distributes tweets
 %user stuff User can only contact the engine to accomplish tasks
-userActor(Username,UserFeed,EnginePID)-> % starter
-  %% add websocket functionality to this actor and engine
-  % this actor will hold a socket for each user connection
-  receive
-    die ->
-      ok;
-    {simStart, NumOfSubs}-> % part of simulator startup first thing done by actor in sim
-      userActor(Username,UserFeed,NumOfSubs,EnginePID)
-  end.
-userActor(Username,UserFeed,NumberOfSubscribers,EnginePID)-> % main userloop this will become the socket in part 2
+userActor(Username,UserFeed,EnginePID,WebUser)-> % main userloop this will become the socket in part 2
   receive
     die ->
       ok;
     {tweet, Message}-> % received from engine % in part 2 these will be relayed over the socket if connected
-      userActor(Username,[Message | UserFeed],NumberOfSubscribers,EnginePID);
+      if
+        WebUser == null->
+          ok;
+        true ->
+          WebUser ! {tweet,Message}
+      end,
+      userActor(Username,[Message] ++ UserFeed,EnginePID,WebUser);
     {tweets, ListOfTweets}-> % received from engine as a result of following someone new
-      userActor(Username,[ListOfTweets|UserFeed],NumberOfSubscribers,EnginePID);
-    {simSubCountUpdate, NumOfSubs}-> % part of simulator startup first thing done by actor in sim
-      userActor(Username,UserFeed,NumOfSubs,EnginePID)
+      if
+        WebUser == null->
+          ok;
+        true ->
+          WebUser ! {tweetList,ListOfTweets}
+      end,
+      userActor(Username,ListOfTweets++ UserFeed,EnginePID,WebUser);
+    {sendTweet,Tweet}->
+        userSendTweet(EnginePID,Username,Tweet),
+        userActor(Username,UserFeed,EnginePID,WebUser);
+    {subscribeTo, User}->
+        userSubscribeTo(EnginePID,user,User),
+        userActor(Username,UserFeed,EnginePID,WebUser);
+    {updateWebUser, NewWebUser}->
+        userActor(Username,UserFeed,EnginePID,NewWebUser);
+    {getFeed, UserPID}->
+        UserPID ! {tweetList,UserFeed},
+        userActor(Username,UserFeed,EnginePID,WebUser)
   end.
 %userActions
 userSubscribeTo(EnginePID,UserOrHashTag,ID)-> % done
@@ -43,10 +56,20 @@ userSendRetweet(EnginePID,Username,OriginalTweet)->% done originalTweet = {Origi
   EnginePID ! {distributeTweet,{Username,Tweet}}.
 
 %engine stuff
-startEngine(TotalNumberOfUsers)-> % returns enginePID % done
+getEngine()->
+  PID = whereis(engine),
+  if
+    PID == undefined->
+      startEngine();
+    true->
+      PID
+  end.
+startEngine()-> % returns enginePID % done
   UserDatabase = #{},
   HashTagDatabase = #{},
-  spawn(twitterEngine,engineActor,[UserDatabase,HashTagDatabase,TotalNumberOfUsers,0,0]).
+  PID = spawn(engine,engineActor,[UserDatabase,HashTagDatabase,0,0,0]),
+  register(engine, PID),
+  PID.
 killEngine(EnginePID)-> % done
   EnginePID ! die.
 
@@ -62,7 +85,7 @@ engineActor(UserDatabase,HashTagDatabase,NumberOfSpecialTweets,NumOfTweets,Distr
       ok;
   % loop ends here don't call self
     {registerUser,Username}-> % done
-      PID =  spawn(twitterEngine,userActor,[Username,[],self()]), %TotalNumberOfUsers used for tweet simulation...
+      PID =  spawn(engine,userActor,[Username,[],self(),null]), %TotalNumberOfUsers used for tweet simulation...
       engineActor(maps:put(Username,{[],[],PID},UserDatabase),HashTagDatabase,NumberOfSpecialTweets,NumOfTweets,DistributedTo);
     {logOn,Username,PID}-> % done
       {_,_,ActorPID} = maps:get(Username,UserDatabase),
@@ -83,16 +106,16 @@ engineActor(UserDatabase,HashTagDatabase,NumberOfSpecialTweets,NumOfTweets,Distr
       % Tweets sent as {User,message} tweet will be just the message
       ListOfHashTags = tweetSpecialCharParse(Tweet,"#"),
       ListOfMentions = tweetSpecialCharParse(Tweet,"@"),
-      spawn(twitterEngine,processHashTags,[ListOfHashTags,FullTweet,self()]),
-      spawn(twitterEngine,processMentions,[ListOfMentions,FullTweet,UserDatabase]),
+      spawn(engine,processHashTags,[ListOfHashTags,FullTweet,self()]),
+      spawn(engine,processMentions,[ListOfMentions,FullTweet,UserDatabase]),
       {Tweets,Subs,SubActorPID} = maps:get(Tweeter,UserDatabase), % send to followers
-      spawn(twitterEngine,distributerActor,[Subs,FullTweet]),% send tweet with distributer in own process
+      spawn(engine,distributerActor,[Subs,FullTweet]),% send tweet with distributer in own process
       % add to Tweeter's Tweet list
       engineActor(maps:put(Tweeter,{[FullTweet | Tweets],Subs,SubActorPID},UserDatabase),HashTagDatabase,NumberOfSpecialTweets + length(ListOfMentions),NumOfTweets + 1,DistributedTo + length(Subs));
     {distributeHashTag,HashTag,Tweet}-> % done
       {Tweets,Subs} = try maps:get(HashTag,HashTagDatabase)
                       catch _:_ -> {[],[]} end,
-      spawn(twitterEngine,distributerActor,[Subs,Tweet]),
+      spawn(engine,distributerActor,[Subs,Tweet]),
       HashTagDatabase2 = maps:put(HashTag,{[Tweet|Tweets],Subs},HashTagDatabase),
       engineActor(UserDatabase,HashTagDatabase2,NumberOfSpecialTweets+1,NumOfTweets,DistributedTo + length(Subs))
   end.

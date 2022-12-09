@@ -20,12 +20,10 @@ start_link() ->
 %% ===================================================================
 %% Supervisor callbacks
 %% ===================================================================
-
 init([]) ->
     application:load(nitrogen_core),
     application:start(nitro_cache),
     application:start(crypto),
     application:start(nprocreg),
     application:start(simple_bridge),
-
     {ok, { {one_for_one, 5, 10}, []} }.

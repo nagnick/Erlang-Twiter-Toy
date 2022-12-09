@@ -1,7 +1,7 @@
 %% -*- mode: nitrogen -*-
 -module (index).
 -compile(export_all).
-
+-import(engine,[logOn/2,getEngine/0]).
 -include_lib("nitrogen_core/include/wf.hrl").
 
 main() -> #template { file="./site/templates/bare.html" }.
@@ -22,20 +22,18 @@ inner_body() ->
         running. Click the button below to test postbacks.
         ",
         #p{}, 	
-        #button { id=button, text="Click me!", postback=click },
-		#p{},
-        "
-        Run <b>./bin/dev help</b> to see some useful developer commands.
-        ",
-		#p{},
-		"
-		<b>Want to see the ",#link{text="Sample Nitrogen jQuery Mobile Page",url="/mobile"},"?</b>
-		"
+        #button { id=login, text="Click to login", postback={click,login} },
+		#button { id=signup, text="Click to signup", postback={click,signup} },
+		#p{}
     ].
 	
-event(click) ->
-    wf:replace(button, #panel { 
-        body="You clicked the button!", 
-        actions=#effect { effect=highlight }
-        actions=#effect { effect= }
-    }).
+event({click,Button}) ->
+if
+    Button == signup->
+        wf:redirect("/user/signup");
+    Button == login->
+        wf:redirect("/user/login");
+    true->
+        ok
+end.
+

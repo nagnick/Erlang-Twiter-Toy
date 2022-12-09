@@ -1,14 +1,14 @@
 %% -*- mode: nitrogen -*-
 %% vim: ts=4 sw=4 et
--module (user_login).
+-module (user_signup).
+-import(engine,[getEngine/0,registerUser/2]).
 -compile(export_all).
--import(engine,[logOn/2,getEngine/0]).
 -include_lib("nitrogen_core/include/wf.hrl").
 -include("records.hrl").
 
 main() -> #template { file="./site/templates/bare.html" }.
 
-title() -> "Hello from user_login.erl!".
+title() -> "Hello from user_signup.erl!".
 
 body() -> 
     [
@@ -18,17 +18,16 @@ body() ->
              #p{},
             #password { id=password, placeholder="Password"},
             #p{},
-            #button { text="logIn", postback=click },
+            #button { text="signup", postback=signup },
 
             #p{},
             #panel { id=placeholder }
         ]}
     ].
 	
-event(click) ->
+event(signup) ->
     Username = wf:q(username),
     Password = wf:q(password),
-    %logOn(Username,getEngine()), % replace with a validation function don't return userPID here
-    wf:insert_top(placeholder, "<p>You logged in!!!" ++ Username ++ Password),
-    wf:user(Username),
-    wf:redirect("/user/home").
+    registerUser(getEngine(),Username),
+    wf:insert_top(placeholder, "<p>You Signed up. You may now sign in." ++ Username ++ Password),
+    wf:redirect("/user/login").
