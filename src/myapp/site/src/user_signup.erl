@@ -1,7 +1,7 @@
 %% -*- mode: nitrogen -*-
 %% vim: ts=4 sw=4 et
 -module (user_signup).
--import(engine,[getEngine/0,registerUser/2]).
+-import(engine,[getEngine/0,registerUser/3]).
 -compile(export_all).
 -include_lib("nitrogen_core/include/wf.hrl").
 -include("records.hrl").
@@ -25,9 +25,17 @@ body() ->
         ]}
     ].
 	
+
 event(signup) ->
     Username = wf:q(username),
     Password = wf:q(password),
-    registerUser(getEngine(),Username),
+    Result = registerUser(getEngine(),Username,Password),
+    if
+        Result == error->
+            wf:user("Error" ++ "||" ++ "Error"),
+            wf:update(placeholder, "User Exists");
+        true->
+            wf:user(Username ++ "||" ++ Password),
+            wf:redirect("/user/home")
+    end.
     %wf:insert_top(placeholder, "<p>You Signed up. You may now sign in." ++ Username ++ Password),
-    wf:redirect("/user/login").

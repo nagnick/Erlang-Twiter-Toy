@@ -2,7 +2,7 @@
 %% vim: ts=4 sw=4 et
 -module (user_login).
 -compile(export_all).
--import(engine,[logOn/2,getEngine/0]).
+-import(engine,[logOn/3,getEngine/0]).
 -include_lib("nitrogen_core/include/wf.hrl").
 -include("records.hrl").
 
@@ -12,8 +12,8 @@ title() -> "Twitter Clone".
 
 body() -> 
     [
-        #span { style="text-align: center",text="Twitter Clone" },
-        #panel { style="text-align: center", body=[
+        #span {text="Twitter Clone" },
+        #panel {  body=[
             #textbox { id=username, placeholder="Username", next=textbox2 },
              #p{},
             #password { id=password, placeholder="Password"},
@@ -25,10 +25,16 @@ body() ->
         ]}
     ].
 	
+
 event(click) ->
     Username = wf:q(username),
     Password = wf:q(password),
-    %logOn(Username,getEngine()), % replace with a validation function don't return userPID here
-    %wf:insert_top(placeholder, "<p>You logged in!!!" ++ Username ++ Password),
-    wf:user(Username),
-    wf:redirect("/user/home").
+    Result = logOn(Username,Password,getEngine()),
+    if
+        Result == error->
+            wf:user("Error" ++ "||" ++ "Error"),
+            wf:update(placeholder, "Incorrect username or password");
+        true->
+            wf:user(Username++ "||" ++ Password),
+            wf:redirect("/user/home")
+    end.

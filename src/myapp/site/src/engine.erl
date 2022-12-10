@@ -1,9 +1,10 @@
 -module(engine).
 -compile(export_all).
-%-export([tweetSpecialCharParse/2,userSubscribeTo/3,userSendTweet/3,userSendRetweet/3,registerUser/2,logOn/2,getEngine/0,startEngine/0,killEngine/1,engineActor/5,distributerActor/2,userActor/4,processHashTags/3,processMentions/3]).
+-import(string,[equal/2]). 
 % point of access for client to access user account this must change to accept the websocket design
-logOn(UserName,EnginePID)->%userStartUp part 2 stuff WIP pass this engine useractor to the websocket actor as api
-  EnginePID ! {logOn,UserName,self()},
+
+logOn(UserName,Password,EnginePID)->%userStartUp part 2 stuff WIP pass this engine useractor to the websocket actor as api
+  EnginePID ! {logOn,UserName,Password,self()},
   receive
     PID->
       PID %% return the PID of the userActor for the username given
@@ -56,7 +57,7 @@ userSendTweet(EnginePID,UserName,Tweet)-> % done
 
 userSendRetweet(EnginePID,Username,OriginalTweet)->% done originalTweet = {OriginalSender, OriginalMessage}
   {OSender,OMessage} = OriginalTweet,
-  Tweet =  "ReTweet: " ++ OMessage ++ ("@" ++ OSender), % retweets you send the original tweet as your own but at end you mention original poster
+  Tweet =  "ReTweet: \"" ++ OMessage ++ ("\" Original creator: " ++ OSender), % retweets you send the original tweet as your own but at end you mention original poster
   EnginePID ! {distributeTweet,{Username,Tweet}}.
 
 
@@ -78,8 +79,12 @@ startEngine()-> % returns enginePID % done
 killEngine(EnginePID)-> % done
   EnginePID ! die.
 
-registerUser(EnginePID, Username)-> % done
-  EnginePID ! {registerUser,Username}.
+registerUser(EnginePID, Username,Password)-> % done
+  EnginePID ! {registerUser,Username,Password,self()},
+  receive
+    PID->
+      PID %% return the PID of the userActor for the username given
+  end.
 
 engineActor(UserDatabase,HashTagDatabase)->
   % this actor will have to be able to recive connection requests through logOn and pair that connection to the appropriate user actor
@@ -89,21 +94,40 @@ engineActor(UserDatabase,HashTagDatabase)->
       killActorInUserDatabase(UserDatabase),
       ok;
   % loop ends here don't call self
-    {registerUser,Username}-> % done
-      PID =  spawn(engine,userActor,[Username,[],self(),null]), %TotalNumberOfUsers used for tweet simulation...
-      engineActor(maps:put(Username,{[],[],PID},UserDatabase),HashTagDatabase);
-    {logOn,Username,PID}-> % done
-      {_,_,ActorPID} = maps:get(Username,UserDatabase),
-      PID ! ActorPID,
+    {registerUser,Username,Password,PID}-> % done
+      {_,_,_,ActorPID} = maps:get(Username,UserDatabase,{"error",[],[],null}),
+      if
+        ActorPID == null-> % create user
+          PID2 =  spawn(engine,userActor,[Username,[],self(),null]), %TotalNumberOfUsers used for tweet simulation...
+          PID ! PID2,
+          engineActor(maps:put(Username,{Password,[],[],PID2},UserDatabase),HashTagDatabase);
+        true-> % error user exists
+          PID ! error,
+          engineActor(UserDatabase,HashTagDatabase)
+      end;
+    {logOn,Username,Password,PID}-> % done
+      {Password1,_,_,ActorPID} = maps:get(Username,UserDatabase,{"error",[],[],null}),
+      Result = equal(Password, Password1),
+      if
+        Result->
+          PID ! ActorPID;
+        true->
+          PID ! error
+      end,
       engineActor(UserDatabase,HashTagDatabase);
     {subscribeTo,UserPID,user,UserToSubscribeTo}-> % done
-      {Tweets,Subs,SubActorPID} = maps:get(UserToSubscribeTo,UserDatabase),
+      {Pass,Tweets,Subs,SubActorPID} = maps:get(UserToSubscribeTo,UserDatabase,{"error",[],[],null}),
       %Send to user all tweets sent from before subed
-      UserPID ! {tweets,Tweets},
-      engineActor(maps:put(UserToSubscribeTo,{Tweets,[UserPID|Subs],SubActorPID},UserDatabase),HashTagDatabase);
+      if
+        SubActorPID == null->
+          engineActor(UserDatabase,HashTagDatabase),
+          UserPID ! error;
+        true->
+          UserPID ! {tweets,Tweets},
+          engineActor(maps:put(UserToSubscribeTo,{Pass,Tweets,[UserPID|Subs],SubActorPID},UserDatabase),HashTagDatabase)
+      end;
     {subscribeTo,UserPID,hash,HashToSubscribeTo}-> % done
-      {Tweets,Subs} = try maps:get(HashToSubscribeTo,HashTagDatabase)
-                      catch _:_ -> {[],[]} end,
+      {Tweets,Subs} = maps:get(HashToSubscribeTo,HashTagDatabase,{[],[]}),
       %Send to user all tweets sent from before subed
       UserPID ! {tweets,Tweets},
       engineActor(UserDatabase,maps:put(HashToSubscribeTo,{Tweets,[UserPID|Subs]},HashTagDatabase));
@@ -114,13 +138,12 @@ engineActor(UserDatabase,HashTagDatabase)->
       ListOfMentions = tweetSpecialCharParse(Tweet,"@"),
       spawn(engine,processHashTags,[ListOfHashTags,FullTweet,self()]),
       spawn(engine,processMentions,[ListOfMentions,FullTweet,UserDatabase]),
-      {Tweets,Subs,SubActorPID} = maps:get(Tweeter,UserDatabase), % send to followers
+      {Pass,Tweets,Subs,SubActorPID} = maps:get(Tweeter,UserDatabase), % send to followers
       spawn(engine,distributerActor,[Subs,FullTweet]),% send tweet with distributer in own process
       % add to Tweeter's Tweet list
-      engineActor(maps:put(Tweeter,{[FullTweet | Tweets],Subs,SubActorPID},UserDatabase),HashTagDatabase);
+      engineActor(maps:put(Tweeter,{Pass,[FullTweet | Tweets],Subs,SubActorPID},UserDatabase),HashTagDatabase);
     {distributeHashTag,HashTag,Tweet}-> % done
-      {Tweets,Subs} = try maps:get(HashTag,HashTagDatabase)
-                      catch _:_ -> {[],[]} end,
+      {Tweets,Subs} = maps:get(HashTag,HashTagDatabase,{[],[]}),
       spawn(engine,distributerActor,[Subs,Tweet]),
       HashTagDatabase2 = maps:put(HashTag,{[Tweet|Tweets],Subs},HashTagDatabase),
       engineActor(UserDatabase,HashTagDatabase2)
@@ -135,13 +158,13 @@ processHashTags(ListOfHashTags,Tweet,EnginePID)-> % sends hashtags to engine to 
 processMentions([],_,_)->
   ok;
 processMentions(ListOfMentions,Tweet,UserDatabase)-> % sends tweet to users mentioned in tweet
-  {_,_,ActorPID} = try maps:get(string:sub_string(hd(ListOfMentions),2),UserDatabase) % substring to drop @ char from front...
-                   catch _:_ -> {[],[],null} end, % incase where actor does not exist
+  {_,_,_,ActorPID} = maps:get(string:sub_string(hd(ListOfMentions),2),UserDatabase,{"error",[],[],null}),
   if
     ActorPID == null-> % no actor with that name don't do anything
       ok;
     true ->
-      ActorPID ! {tweet, Tweet}
+      {U,T} = Tweet,
+      ActorPID ! {tweet, {U,"Mentioned in Tweet:" ++ T}}
   end,
   processMentions(tl(ListOfMentions),Tweet,UserDatabase).
 
