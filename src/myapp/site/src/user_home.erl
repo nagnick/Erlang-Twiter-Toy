@@ -8,21 +8,24 @@
 
 main() -> #template { file="./site/templates/bare.html" }.
 
-title() -> "Hello from user_home.erl!".
+title() -> "Twitter".
 
 body() -> 
     {ok,_PID} = wf:comet(fun()-> dataLoop(logOn(wf:user(),getEngine())) end), % run on load
     [
         #panel { style="margin: 50px 100px;", body=[
-            #span { text="Hello from user_home.erl!" },
+            #span { text="Twitter Clone" },
             #p{},
             #textbox { id=username, placeholder="Username to subscribe to" },
-            #button { text="SUB!", postback={click, subscribeTo} },
+            #button { text="Subscribe to user", postback={click, subscribeToUser} },
+            #p{},
+            #textbox { id=hashtag, placeholder="HashTag to subscribe to" },
+            #button { text="Subscribe to hashtag", postback={click, subscribeToHashTag} },
             #p{},
             #textbox { id=tweet, placeholder="New Tweet" },
-            #button { text="SendTweet!", postback={click,sendTweet} },
+            #button { text="Send Tweet", postback={click,sendTweet} },
             #p{},
-            #button { text="GetTweets", postback={click,getTweet} },
+            #button { text="Get Tweets", postback={click,getTweet} },
             #p{},
             #panel { id=placeholder}
         ]}
@@ -32,15 +35,17 @@ event({click, Button}) ->
 EnginePID = getEngine(),
 UserName = wf:user(),
 UserPID = logOn(wf:user(),getEngine()),
-UserPID ! {updateWebUser, self()},
 io:format("~p~n",[UserPID]),
 if
     Button == sendTweet->
         Tweet = wf:q(tweet),
         userSendTweet(EnginePID,UserName,Tweet);
-    Button == subscribeTo->
-        UserToSubTO = wf:q(username),
-        UserPID ! {subscribeTo, UserToSubTO};
+    Button == subscribeToUser->
+        UserToSubTo = wf:q(username),
+        UserPID ! {subscribeToU, UserToSubTo};
+    Button == subscribeToHashTag->
+        HashTag = wf:q(hashtag),
+        UserPID ! {subscribeToH, HashTag};
     Button == getTweet->
         UserPID ! {getFeed, self()},
         receive
@@ -100,7 +105,7 @@ dataLoop(UserPID,Feed)->
 
 
 renderTweet({UserName,Text})->
-    "<p>" ++ UserName ++ Text.
+    "<p>" ++ "By: " ++ UserName ++" Tweet: " ++ Text.
 tweetFeed([])->
     ok;
 tweetFeed(Feed)->

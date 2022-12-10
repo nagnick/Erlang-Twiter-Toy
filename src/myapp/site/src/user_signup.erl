@@ -8,11 +8,11 @@
 
 main() -> #template { file="./site/templates/bare.html" }.
 
-title() -> "Hello from user_signup.erl!".
+title() -> "Twitter Clone".
 
 body() -> 
     [
-        #span { text="Twitter Clone In Erlang With Nitrogen" },
+        #span { text="Twitter Clone" },
         #panel { style="center-align", body=[
             #textbox { id=username, placeholder="Username", next=textbox2 },
              #p{},
@@ -29,5 +29,5 @@ event(signup) ->
     Username = wf:q(username),
     Password = wf:q(password),
     registerUser(getEngine(),Username),
-    wf:insert_top(placeholder, "<p>You Signed up. You may now sign in." ++ Username ++ Password),
+    %wf:insert_top(placeholder, "<p>You Signed up. You may now sign in." ++ Username ++ Password),
     wf:redirect("/user/login").

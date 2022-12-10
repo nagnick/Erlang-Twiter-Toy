@@ -1,12 +1,11 @@
 %% -*- mode: nitrogen -*-
 -module (index).
 -compile(export_all).
--import(engine,[logOn/2,getEngine/0]).
 -include_lib("nitrogen_core/include/wf.hrl").
 
 main() -> #template { file="./site/templates/bare.html" }.
 
-title() -> "Welcome to Nitrogen".
+title() -> "Twitter Clone".
 
 body() ->
     #container_12 { body=[
@@ -15,12 +14,7 @@ body() ->
 
 inner_body() -> 
     [
-        #h1 { text="Welcome to Nitrogen" },
-        #p{},
-        "
-        If you can see this page, then your Nitrogen server is up and
-        running. Click the button below to test postbacks.
-        ",
+        #h1 { text="Twitter Clone" },
         #p{}, 	
         #button { id=login, text="Click to login", postback={click,login} },
 		#button { id=signup, text="Click to signup", postback={click,signup} },

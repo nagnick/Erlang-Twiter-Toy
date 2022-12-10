@@ -10,7 +10,7 @@ logOn(UserName,EnginePID)->%userStartUp part 2 stuff WIP pass this engine userac
   end.
 %users send/receive tweets. engine distributes tweets
 %user stuff User can only contact the engine to accomplish tasks
-userActor(Username,UserFeed,EnginePID,WebUser)-> % main userloop this will become the socket in part 2
+userActor(Username,UserFeed,EnginePID,WebUser)-> % middle man of engine and webuser actors
   receive
     die ->
       ok;
@@ -30,11 +30,15 @@ userActor(Username,UserFeed,EnginePID,WebUser)-> % main userloop this will becom
           WebUser ! {tweetList,ListOfTweets}
       end,
       userActor(Username,ListOfTweets++ UserFeed,EnginePID,WebUser);
+      % recived from web users
     {sendTweet,Tweet}->
         userSendTweet(EnginePID,Username,Tweet),
         userActor(Username,UserFeed,EnginePID,WebUser);
-    {subscribeTo, User}->
+    {subscribeToU, User}->
         userSubscribeTo(EnginePID,user,User),
+        userActor(Username,UserFeed,EnginePID,WebUser);
+    {subscribeToH, HashTag}->
+        userSubscribeTo(EnginePID,hash,HashTag),
         userActor(Username,UserFeed,EnginePID,WebUser);
     {updateWebUser, NewWebUser}->
         userActor(Username,UserFeed,EnginePID,NewWebUser);
@@ -52,8 +56,9 @@ userSendTweet(EnginePID,UserName,Tweet)-> % done
 
 userSendRetweet(EnginePID,Username,OriginalTweet)->% done originalTweet = {OriginalSender, OriginalMessage}
   {OSender,OMessage} = OriginalTweet,
-  Tweet = OMessage ++ ("@" ++ OSender), % retweets you send the original tweet as your own but at end you mention original poster
+  Tweet =  "ReTweet: " ++ OMessage ++ ("@" ++ OSender), % retweets you send the original tweet as your own but at end you mention original poster
   EnginePID ! {distributeTweet,{Username,Tweet}}.
+
 
 %engine stuff
 getEngine()->
@@ -67,7 +72,7 @@ getEngine()->
 startEngine()-> % returns enginePID % done
   UserDatabase = #{},
   HashTagDatabase = #{},
-  PID = spawn(engine,engineActor,[UserDatabase,HashTagDatabase,0,0,0]),
+  PID = spawn(engine,engineActor,[UserDatabase,HashTagDatabase]),
   register(engine, PID),
   PID.
 killEngine(EnginePID)-> % done
@@ -76,7 +81,7 @@ killEngine(EnginePID)-> % done
 registerUser(EnginePID, Username)-> % done
   EnginePID ! {registerUser,Username}.
 
-engineActor(UserDatabase,HashTagDatabase,NumberOfSpecialTweets,NumOfTweets,DistributedTo)->
+engineActor(UserDatabase,HashTagDatabase)->
   % this actor will have to be able to recive connection requests through logOn and pair that connection to the appropriate user actor
   % maybe put a socketServer listen on a seperate actor that will pass the connection to this user and give it to userActors to pass information back and forth
   receive
@@ -86,21 +91,22 @@ engineActor(UserDatabase,HashTagDatabase,NumberOfSpecialTweets,NumOfTweets,Distr
   % loop ends here don't call self
     {registerUser,Username}-> % done
       PID =  spawn(engine,userActor,[Username,[],self(),null]), %TotalNumberOfUsers used for tweet simulation...
-      engineActor(maps:put(Username,{[],[],PID},UserDatabase),HashTagDatabase,NumberOfSpecialTweets,NumOfTweets,DistributedTo);
+      engineActor(maps:put(Username,{[],[],PID},UserDatabase),HashTagDatabase);
     {logOn,Username,PID}-> % done
       {_,_,ActorPID} = maps:get(Username,UserDatabase),
       PID ! ActorPID,
-      engineActor(UserDatabase,HashTagDatabase,NumberOfSpecialTweets,NumOfTweets,DistributedTo);
+      engineActor(UserDatabase,HashTagDatabase);
     {subscribeTo,UserPID,user,UserToSubscribeTo}-> % done
       {Tweets,Subs,SubActorPID} = maps:get(UserToSubscribeTo,UserDatabase),
       %Send to user all tweets sent from before subed
       UserPID ! {tweets,Tweets},
-      engineActor(maps:put(UserToSubscribeTo,{Tweets,[UserPID|Subs],SubActorPID},UserDatabase),HashTagDatabase,NumberOfSpecialTweets,NumOfTweets,DistributedTo);
+      engineActor(maps:put(UserToSubscribeTo,{Tweets,[UserPID|Subs],SubActorPID},UserDatabase),HashTagDatabase);
     {subscribeTo,UserPID,hash,HashToSubscribeTo}-> % done
-      {Tweets,Subs} = maps:get(HashToSubscribeTo,HashTagDatabase),
+      {Tweets,Subs} = try maps:get(HashToSubscribeTo,HashTagDatabase)
+                      catch _:_ -> {[],[]} end,
       %Send to user all tweets sent from before subed
       UserPID ! {tweets,Tweets},
-      engineActor(UserDatabase,maps:put(HashToSubscribeTo,{Tweets,[UserPID|Subs]},HashTagDatabase),NumberOfSpecialTweets,NumOfTweets,DistributedTo);
+      engineActor(UserDatabase,maps:put(HashToSubscribeTo,{Tweets,[UserPID|Subs]},HashTagDatabase));
     {distributeTweet,FullTweet}-> % done
       {Tweeter,Tweet} = FullTweet,
       % Tweets sent as {User,message} tweet will be just the message
@@ -111,13 +117,13 @@ engineActor(UserDatabase,HashTagDatabase,NumberOfSpecialTweets,NumOfTweets,Distr
       {Tweets,Subs,SubActorPID} = maps:get(Tweeter,UserDatabase), % send to followers
       spawn(engine,distributerActor,[Subs,FullTweet]),% send tweet with distributer in own process
       % add to Tweeter's Tweet list
-      engineActor(maps:put(Tweeter,{[FullTweet | Tweets],Subs,SubActorPID},UserDatabase),HashTagDatabase,NumberOfSpecialTweets + length(ListOfMentions),NumOfTweets + 1,DistributedTo + length(Subs));
+      engineActor(maps:put(Tweeter,{[FullTweet | Tweets],Subs,SubActorPID},UserDatabase),HashTagDatabase);
     {distributeHashTag,HashTag,Tweet}-> % done
       {Tweets,Subs} = try maps:get(HashTag,HashTagDatabase)
                       catch _:_ -> {[],[]} end,
       spawn(engine,distributerActor,[Subs,Tweet]),
       HashTagDatabase2 = maps:put(HashTag,{[Tweet|Tweets],Subs},HashTagDatabase),
-      engineActor(UserDatabase,HashTagDatabase2,NumberOfSpecialTweets+1,NumOfTweets,DistributedTo + length(Subs))
+      engineActor(UserDatabase,HashTagDatabase2)
   end.
 
 processHashTags([],_,_)->

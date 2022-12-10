@@ -8,12 +8,12 @@
 
 main() -> #template { file="./site/templates/bare.html" }.
 
-title() -> "Hello from user_login.erl!".
+title() -> "Twitter Clone".
 
 body() -> 
     [
-        #span { text="Twitter Clone In Erlang With Nitrogen" },
-        #panel { style="center-align", body=[
+        #span { style="text-align: center",text="Twitter Clone" },
+        #panel { style="text-align: center", body=[
             #textbox { id=username, placeholder="Username", next=textbox2 },
              #p{},
             #password { id=password, placeholder="Password"},
@@ -29,6 +29,6 @@ event(click) ->
     Username = wf:q(username),
     Password = wf:q(password),
     %logOn(Username,getEngine()), % replace with a validation function don't return userPID here
-    wf:insert_top(placeholder, "<p>You logged in!!!" ++ Username ++ Password),
+    %wf:insert_top(placeholder, "<p>You logged in!!!" ++ Username ++ Password),
     wf:user(Username),
     wf:redirect("/user/home").
