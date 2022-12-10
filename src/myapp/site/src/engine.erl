@@ -118,19 +118,31 @@ engineActor(UserDatabase,HashTagDatabase)->
     {subscribeTo,UserPID,user,UserToSubscribeTo}-> % done
       {Pass,Tweets,Subs,SubActorPID} = maps:get(UserToSubscribeTo,UserDatabase,{"error",[],[],null}),
       %Send to user all tweets sent from before subed
+      Result = searchListForPID(UserPID,Subs), % check if already in list
       if
-        SubActorPID == null->
-          engineActor(UserDatabase,HashTagDatabase),
-          UserPID ! error;
-        true->
-          UserPID ! {tweets,Tweets},
-          engineActor(maps:put(UserToSubscribeTo,{Pass,Tweets,[UserPID|Subs],SubActorPID},UserDatabase),HashTagDatabase)
+        Result == true->
+          engineActor(UserDatabase,HashTagDatabase);
+        true-> % not is list
+          if
+            SubActorPID == null->
+              engineActor(UserDatabase,HashTagDatabase),
+              UserPID ! error;
+            true->
+              UserPID ! {tweets,Tweets},
+              engineActor(maps:put(UserToSubscribeTo,{Pass,Tweets,[UserPID|Subs],SubActorPID},UserDatabase),HashTagDatabase)
+          end
       end;
     {subscribeTo,UserPID,hash,HashToSubscribeTo}-> % done
       {Tweets,Subs} = maps:get(HashToSubscribeTo,HashTagDatabase,{[],[]}),
-      %Send to user all tweets sent from before subed
-      UserPID ! {tweets,Tweets},
-      engineActor(UserDatabase,maps:put(HashToSubscribeTo,{Tweets,[UserPID|Subs]},HashTagDatabase));
+      Result = searchListForPID(UserPID,Subs), % check if already in list
+      if
+        Result == true->
+          engineActor(UserDatabase,HashTagDatabase);
+        true-> % not is list
+          %Send to user all tweets sent from before subed
+          UserPID ! {tweets,Tweets},
+          engineActor(UserDatabase,maps:put(HashToSubscribeTo,{Tweets,[UserPID|Subs]},HashTagDatabase))
+      end;
     {distributeTweet,FullTweet}-> % done
       {Tweeter,Tweet} = FullTweet,
       % Tweets sent as {User,message} tweet will be just the message
@@ -175,6 +187,16 @@ distributerActor(SendToList,Tweet)->
   distributerActor(tl(SendToList),Tweet).
 
 %helpers
+searchListForPID(_,[])->
+  false;
+searchListForPID(PID,List)->
+  if
+    PID == hd(List)->
+      true;
+    true->
+      searchListForPID(PID,tl(List))
+  end.
+
 actorKiller([])-> %Tell actors to kill themselves
   ok;
 actorKiller(ListOfActors)->

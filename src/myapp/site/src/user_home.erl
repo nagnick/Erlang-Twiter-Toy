@@ -33,8 +33,6 @@ body() ->
             #textbox { id=tweet, placeholder="New Tweet" },
             #button { text="Send Tweet", postback={click,sendTweet,junk} },
             #p{},
-            #button { text="Get Tweets", postback={click,getTweet,junk} },
-            #p{},
             #panel { id=placeholder},
             #panel{id = tweetFeed}
         ]}

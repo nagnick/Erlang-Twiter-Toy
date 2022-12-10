@@ -12,30 +12,35 @@ title() -> "Twitter Clone".
 
 body() -> 
     [
-        #span { text="Twitter Clone" },
+        #span { text="Twitter Clone Sign Up Now!" },
         #panel { style="center-align", body=[
             #textbox { id=username, placeholder="Username", next=textbox2 },
              #p{},
             #password { id=password, placeholder="Password"},
             #p{},
             #button { text="signup", postback=signup },
-
+            #button { text="Go to logIn", postback=click },
             #p{},
             #panel { id=placeholder }
         ]}
     ].
 	
 
-event(signup) ->
-    Username = wf:q(username),
-    Password = wf:q(password),
-    Result = registerUser(getEngine(),Username,Password),
+event(Click) ->
     if
-        Result == error->
-            wf:user("Error" ++ "||" ++ "Error"),
-            wf:update(placeholder, "User Exists");
+        Click == signup->
+            Username = wf:q(username),
+            Password = wf:q(password),
+            Result = registerUser(getEngine(),Username,Password),
+            if
+                Result == error->
+                    wf:user("Error" ++ "||" ++ "Error"),
+                    wf:update(placeholder, "User Exists");
+                true->
+                    wf:user(Username ++ "||" ++ Password),
+                    wf:redirect("/user/home")
+            end;
         true->
-            wf:user(Username ++ "||" ++ Password),
-            wf:redirect("/user/home")
+             wf:redirect("/user/login")
     end.
     %wf:insert_top(placeholder, "<p>You Signed up. You may now sign in." ++ Username ++ Password),
