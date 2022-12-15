@@ -14,5 +14,5 @@ How to set up project and run:
 10. Open new commandline terminal (don't close the nitrogen console terminal) and go to the myapp directory
 11. Run the following command to compile the new src directory we put in:
     bin/dev compile
-12. Refresh localhost:8000 should see twitter clone
+12. Refresh localhost:8000 should see twitter clone with the options to login or sign up
   
