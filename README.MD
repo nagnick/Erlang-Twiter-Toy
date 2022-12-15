@@ -1,29 +1,18 @@
-Twitter
+Twitter clone with websockets
 
-
-
-Anurag - We are using chord implementation. How can I implement register new user. 
-
-Limit: 30500
-
-
-
-Database design:
-main functions:
-1. query(which database actor has my user data) for user data location.(once you know where it is you can update or retreive the user data) 
-2. add new user data entry to database
-
-3 main parts:
-1. Table actor(this is entry point to distributed database): This actor has a map that holds all database actor pids keyed on their unique hashed ID. (unique hash ID is used to figure out where twitter user is stored if userID hash <= actorID hash user is stored in that actor(Like chord stored in actor with greatest hashed ID not exceeding my userID hash value))
-2. Database actor(a single node of the distributed database): This actor holds a map that holds twitter users infomrmation keyed on twitter userID.
-3. User data = {userID, list of all my tweets, list of followers, list of who I follow} may change in future
-
-Send/receive engine design:
-main functions:
-
-1.send out tweets to all users active and into that users database file
-
-2.user login(retreive my home feed of twets from people I follow)
-  2a. query all the data from people I follow
-  2b. merge the tweets from people I follow into single list(home feed) based on tweet timestamp most recent on top
+How to set up project and run:
+1. Create a project directory and run the following commands:
+2. git clone https://github.com/nitrogen/nitrogen.git
+3. cd nitrogen 
+4. make rel_mochiweb
+5. cd ..
+6. cd myapp
+7. In myapp replace site/src directory with the provided src directory (submission src)
+8. Run the following command in the myapp directory:
+   bin/nitrogen console
+9. website is running on localhost:8000 but has not been recompiled
+10. Open new commandline terminal (don't close the nitrogen console terminal) and go to the myapp directory
+11. Run the following command to compile the new src directory we put in:
+    bin/dev compile
+12. Refresh localhost:8000 should see twitter clone
   
