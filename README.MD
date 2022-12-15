@@ -12,8 +12,7 @@ How to set up project and run:
    bin/nitrogen console
 9. website is running on localhost:8000 but has not been recompiled
 10. Open new commandline terminal (don't close the nitrogen console terminal) and go to the myapp directory
-11. Now go to myapp directory in the new termional. Run : touch site/src/index.erl
-12. Run the following command to compile the new src directory we put in:
+11. Run the following command to compile the new src directory we put in:
     bin/dev compile
-13. Refresh localhost:8000 should see twitter clone with the options to login or sign up
+12. Refresh localhost:8000/user/signup should see twitter clone with the options to sign up
   
